@@ -1,0 +1,15 @@
+# Dependencies
+node_modules/
+.venv/
+__pycache__/
+*.pyc
+
+# Environment Variables - NEVER commit these
+.env
+
+# Build outputs
+dist/
+build/
+
+# Logs
+*.log
