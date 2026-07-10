@@ -3,6 +3,7 @@ import time
 import shutil
 import tempfile
 from git import Repo
+from langchain_core.documents import Document
 from langchain_community.document_loaders import DirectoryLoader, TextLoader
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_community.embeddings import JinaEmbeddings
@@ -10,9 +11,29 @@ from langchain_mongodb import MongoDBAtlasVectorSearch
 from pymongo import MongoClient
 
 SUPPORTED_EXTENSIONS = ['.py', '.js', '.jsx', '.ts', '.tsx', '.md', '.txt', '.json', '.yaml', '.yml', '.html', '.css']
+# Files that are pure metadata/lockfiles — useless for RAG and pollute similarity search
+BLOCKED_FILENAMES = {'package-lock.json', 'yarn.lock', 'pnpm-lock.yaml', '.env', '.env.example'}
 BATCH_SIZE = 50        # Chunks per batch
 BATCH_DELAY = 2        # Seconds between batches
 MAX_CHUNKS = 500       # Cap to prevent excessive API usage
+
+# Folders to skip when building the directory tree
+SKIP_DIRS = {'node_modules', '.git', '__pycache__', '.venv', 'venv', 'dist', 'build', '.nyc_output', 'coverage'}
+
+def get_directory_tree(repo_path: str) -> str:
+    """Walk the repo and return a human-readable directory tree string."""
+    tree_lines = ["REPOSITORY DIRECTORY STRUCTURE:"]
+    for root, dirs, files in os.walk(repo_path):
+        # Prune noisy/large directories in-place so os.walk skips them
+        dirs[:] = sorted(d for d in dirs if d not in SKIP_DIRS and not d.startswith('.'))
+        level = root.replace(repo_path, '').count(os.sep)
+        indent = '  ' * level
+        folder_name = os.path.basename(root) or os.path.basename(repo_path)
+        tree_lines.append(f"{indent}{folder_name}/")
+        sub_indent = '  ' * (level + 1)
+        for file in sorted(files):
+            tree_lines.append(f"{sub_indent}{file}")
+    return "\n".join(tree_lines)
 
 def load_documents(directory: str):
     """Load documents from multiple file extensions."""
@@ -26,7 +47,10 @@ def load_documents(directory: str):
                 loader_kwargs={"encoding": "utf-8", "autodetect_encoding": True},
                 silent_errors=True,
             )
-            all_docs.extend(loader.load())
+            docs = loader.load()
+            # Filter out blocked filenames (lockfiles, .env, etc.)
+            docs = [d for d in docs if os.path.basename(d.metadata.get("source", "")) not in BLOCKED_FILENAMES]
+            all_docs.extend(docs)
         except Exception:
             continue
     return all_docs
@@ -38,15 +62,23 @@ def process_github_repo(repo_url: str):
         print(f"Cloning {repo_url}...")
         Repo.clone_from(repo_url, temp_dir)
 
-        # 2. Load Documents
+        # 2. Build and inject the directory tree as a special document
+        print("Building directory tree document...")
+        tree_text = get_directory_tree(temp_dir)
+        tree_doc = Document(
+            page_content=tree_text,
+            metadata={"source": "directory_tree", "type": "structure"}
+        )
+
+        # 3. Load file-content Documents
         print("Loading documents...")
-        docs = load_documents(temp_dir)
-        print(f"Loaded {len(docs)} documents")
+        docs = [tree_doc] + load_documents(temp_dir)
+        print(f"Loaded {len(docs)} documents (including directory tree)")
 
         if not docs:
             return {"status": "warning", "message": "No readable files found in repository", "chunks_processed": 0}
 
-        # 3. Chunk Documents
+        # 4. Chunk Documents
         splitter = RecursiveCharacterTextSplitter(
             chunk_size=2000,
             chunk_overlap=200,
@@ -61,7 +93,7 @@ def process_github_repo(repo_url: str):
 
         print(f"Processing {len(texts)} chunks in batches of {BATCH_SIZE}...")
 
-        # 4. Generate Embeddings using Jina AI and Save to MongoDB
+        # 5. Generate Embeddings using Jina AI and Save to MongoDB
         mongo_uri = os.environ.get("MONGO_URI")
         jina_api_key = os.environ.get("JINA_API_KEY")
 
