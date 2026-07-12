@@ -3,6 +3,7 @@ uvicorn
 langgraph
 langchain
 langchain-mongodb
+langchain-groq
 pymongo
 langchain-openai
 langchain-google-genai
