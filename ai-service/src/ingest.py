@@ -13,9 +13,9 @@ from pymongo import MongoClient
 SUPPORTED_EXTENSIONS = ['.py', '.js', '.jsx', '.ts', '.tsx', '.md', '.txt', '.json', '.yaml', '.yml', '.html', '.css']
 # Files that are pure metadata/lockfiles — useless for RAG and pollute similarity search
 BLOCKED_FILENAMES = {'package-lock.json', 'yarn.lock', 'pnpm-lock.yaml', '.env', '.env.example'}
-BATCH_SIZE = 50        # Chunks per batch
-BATCH_DELAY = 2        # Seconds between batches
-MAX_CHUNKS = 500       # Cap to prevent excessive API usage
+BATCH_SIZE = 100       # Chunks per batch
+BATCH_DELAY = 1        # Seconds between batches
+MAX_CHUNKS = 2000      # Raised — free Jina tier supports up to 1M tokens/month
 
 # Folders to skip when building the directory tree
 SKIP_DIRS = {'node_modules', '.git', '__pycache__', '.venv', 'venv', 'dist', 'build', '.nyc_output', 'coverage'}

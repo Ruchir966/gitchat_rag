@@ -1,13 +1,19 @@
 import React, { useState, useRef, useEffect } from 'react';
 import axios from 'axios';
 import ReactMarkdown from 'react-markdown';
-import { Send, Loader2, Bot, User, Globe } from 'lucide-react';
+import { Send, Loader2, Bot, User, Globe, RefreshCw, FileCode } from 'lucide-react';
 
 const ChatRoom = ({ repoUrl, onReset }) => {
   const [messages, setMessages] = useState([]);
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
   const messagesEndRef = useRef(null);
+
+  const sessionId = useRef(
+    typeof crypto !== 'undefined' && crypto.randomUUID
+      ? crypto.randomUUID()
+      : Math.random().toString(36).slice(2)
+  );
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -27,15 +33,29 @@ const ChatRoom = ({ repoUrl, onReset }) => {
     setLoading(true);
 
     try {
-      const response = await axios.post('http://localhost:3000/api/chat/message', {
+      const API_URL = import.meta.env.VITE_API_URL || '';
+      const response = await axios.post(`${API_URL}/api/chat/message`, {
         repo_url: repoUrl,
         message: input,
+        session_id: sessionId.current,
       });
 
-      const aiMessage = { role: 'ai', content: response.data.answer };
+      const { answer, sources = [], retry_count = 0 } = response.data;
+
+      const aiMessage = {
+        role: 'ai',
+        content: answer,
+        sources,
+        retry_count,
+      };
       setMessages((prev) => [...prev, aiMessage]);
     } catch (error) {
-      const errorMessage = { role: 'ai', content: 'Sorry, I encountered an error while processing your request.' };
+      const errorMessage = {
+        role: 'ai',
+        content: 'Sorry, I encountered an error while processing your request.',
+        sources: [],
+        retry_count: 0,
+      };
       setMessages((prev) => [...prev, errorMessage]);
     } finally {
       setLoading(false);
@@ -76,21 +96,47 @@ const ChatRoom = ({ repoUrl, onReset }) => {
                   <Bot className="w-5 h-5 text-blue-400" />
                 </div>
               )}
-              <div
-                className={`max-w-[80%] rounded-2xl px-5 py-3.5 ${
-                  msg.role === 'user'
-                    ? 'bg-blue-600 text-white'
-                    : 'bg-slate-800 text-slate-200 border border-slate-700 shadow-lg'
-                }`}
-              >
-                {msg.role === 'user' ? (
-                  <p className="whitespace-pre-wrap">{msg.content}</p>
-                ) : (
-                  <div className="prose prose-invert max-w-none prose-pre:bg-slate-900 prose-pre:border prose-pre:border-slate-700">
-                    <ReactMarkdown>{msg.content}</ReactMarkdown>
+              <div className={`max-w-[80%] flex flex-col gap-2`}>
+                <div
+                  className={`rounded-2xl px-5 py-3.5 ${
+                    msg.role === 'user'
+                      ? 'bg-blue-600 text-white'
+                      : 'bg-slate-800 text-slate-200 border border-slate-700 shadow-lg'
+                  }`}
+                >
+                  {msg.role === 'user' ? (
+                    <p className="whitespace-pre-wrap">{msg.content}</p>
+                  ) : (
+                    <div className="prose prose-invert max-w-none prose-pre:bg-slate-900 prose-pre:border prose-pre:border-slate-700">
+                      <ReactMarkdown>{msg.content}</ReactMarkdown>
+                    </div>
+                  )}
+                </div>
+
+                {/* Metadata badges for AI messages */}
+                {msg.role === 'ai' && (msg.retry_count > 0 || msg.sources?.length > 0) && (
+                  <div className="flex flex-wrap gap-2 px-1">
+                    {/* Retry badge */}
+                    {msg.retry_count > 0 && (
+                      <span className="inline-flex items-center gap-1 text-xs px-2 py-1 rounded-full bg-amber-900/40 text-amber-400 border border-amber-800/50">
+                        <RefreshCw className="w-3 h-3" />
+                        Query rephrased {msg.retry_count}×
+                      </span>
+                    )}
+                    {/* Source file badges */}
+                    {msg.sources?.map((src, i) => (
+                      <span
+                        key={i}
+                        className="inline-flex items-center gap-1 text-xs px-2 py-1 rounded-full bg-slate-700/60 text-slate-400 border border-slate-600/50"
+                      >
+                        <FileCode className="w-3 h-3" />
+                        {src}
+                      </span>
+                    ))}
                   </div>
                 )}
               </div>
+
               {msg.role === 'user' && (
                 <div className="w-8 h-8 rounded-full bg-slate-700 flex items-center justify-center flex-shrink-0 mt-1">
                   <User className="w-5 h-5 text-slate-300" />
