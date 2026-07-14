@@ -9,7 +9,6 @@ const ChatRoom = ({ repoUrl, onReset }) => {
   const [loading, setLoading] = useState(false);
   const messagesEndRef = useRef(null);
 
-  // Generate a stable session_id per browser tab
   const sessionId = useRef(
     typeof crypto !== 'undefined' && crypto.randomUUID
       ? crypto.randomUUID()
@@ -34,7 +33,8 @@ const ChatRoom = ({ repoUrl, onReset }) => {
     setLoading(true);
 
     try {
-      const response = await axios.post('http://localhost:3000/api/chat/message', {
+      const API_URL = import.meta.env.VITE_API_URL || '';
+      const response = await axios.post(`${API_URL}/api/chat/message`, {
         repo_url: repoUrl,
         message: input,
         session_id: sessionId.current,
