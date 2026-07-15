@@ -23,6 +23,7 @@ class ChatMessage(BaseModel):
 
 class ChatRequest(BaseModel):
     message: str
+    repo_url: str
     session_id: Optional[str] = None
     chat_history: Optional[list[ChatMessage]] = []
 
@@ -49,6 +50,7 @@ async def chat(request: ChatRequest):
 
         result = run_agent(
             question=request.message,
+            repo_url=request.repo_url,
             chat_history=lc_history,
         )
 

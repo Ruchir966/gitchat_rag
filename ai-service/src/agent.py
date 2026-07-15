@@ -24,6 +24,7 @@ class GraphState(TypedDict):
     is_relevant: bool       # Whether grade_documents found the chunks useful
     chat_history: list      # List of BaseMessage objects (prior turns)
     sources: list[str]      # Source file paths used in generation
+    repo_url: str           # Active repo — used to scope all vector searches
 
 # ---------------------------------------------------------------------------
 # Keyword helpers for smart routing inside retrieve
@@ -80,7 +81,11 @@ def get_vectorstore():
 
 def retrieve(state: GraphState) -> GraphState:
     question = state["question"]
+    repo_url = state["repo_url"]
     vectorstore = get_vectorstore()
+
+    # Base filter: always scope to the active repo
+    repo_filter = {"metadata.repo_url": {"$eq": repo_url}}
 
     # Priority 1: Structural query → fetch the directory tree document
     if is_structural_query(question):
@@ -88,7 +93,7 @@ def retrieve(state: GraphState) -> GraphState:
             results = vectorstore.similarity_search(
                 query=question,
                 k=3,
-                pre_filter={"metadata.type": {"$eq": "structure"}}
+                pre_filter={"$and": [repo_filter, {"metadata.type": {"$eq": "structure"}}]}
             )
             if results:
                 print("[retrieve] Structural query — using directory_tree document")
@@ -103,7 +108,7 @@ def retrieve(state: GraphState) -> GraphState:
             results = vectorstore.similarity_search(
                 query=question,
                 k=20,  # Grab plenty of chunks to cover the whole file
-                pre_filter={"source": {"$regex": re.escape(filename), "$options": "i"}}
+                pre_filter={"$and": [repo_filter, {"source": {"$regex": re.escape(filename), "$options": "i"}}]}
             )
             if results:
                 print(f"[retrieve] File-specific query — filtered to '{filename}' ({len(results)} chunks)")
@@ -113,7 +118,9 @@ def retrieve(state: GraphState) -> GraphState:
 
     # Default: Similarity search with score — filter out weak matches
     try:
-        results_with_scores = vectorstore.similarity_search_with_score(query=question, k=12)
+        results_with_scores = vectorstore.similarity_search_with_score(
+            query=question, k=12, pre_filter=repo_filter
+        )
         filtered = [
             doc for doc, score in results_with_scores
             if score >= RELEVANCE_SCORE_THRESHOLD
@@ -122,7 +129,7 @@ def retrieve(state: GraphState) -> GraphState:
         documents = filtered if filtered else [doc for doc, _ in results_with_scores]
     except Exception:
         # Fallback: plain similarity search without scores
-        retriever = vectorstore.as_retriever(search_kwargs={"k": 12})
+        retriever = vectorstore.as_retriever(search_kwargs={"k": 12, "pre_filter": repo_filter})
         documents = retriever.invoke(question)
 
     return {**state, "documents": documents}
@@ -306,6 +313,7 @@ app = workflow.compile()
 
 def run_agent(
     question: str,
+    repo_url: str,
     chat_history: Optional[list[BaseMessage]] = None,
 ) -> dict:
     """
@@ -313,6 +321,7 @@ def run_agent(
 
     Args:
         question:     The user's current question.
+        repo_url:     The GitHub repo URL to scope vector searches to.
         chat_history: List of BaseMessage objects representing prior turns.
 
     Returns:
@@ -327,6 +336,7 @@ def run_agent(
         "is_relevant": False,
         "chat_history": chat_history or [],
         "sources": [],
+        "repo_url": repo_url,
     }
 
     final_state = None

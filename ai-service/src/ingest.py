@@ -67,12 +67,16 @@ def process_github_repo(repo_url: str):
         tree_text = get_directory_tree(temp_dir)
         tree_doc = Document(
             page_content=tree_text,
-            metadata={"source": "directory_tree", "type": "structure"}
+            metadata={"source": "directory_tree", "type": "structure", "repo_url": repo_url}
         )
 
         # 3. Load file-content Documents
         print("Loading documents...")
-        docs = [tree_doc] + load_documents(temp_dir)
+        raw_docs = load_documents(temp_dir)
+        # Tag every document with the repo_url so we can filter/delete per-repo
+        for doc in raw_docs:
+            doc.metadata["repo_url"] = repo_url
+        docs = [tree_doc] + raw_docs
         print(f"Loaded {len(docs)} documents (including directory tree)")
 
         if not docs:
@@ -99,6 +103,10 @@ def process_github_repo(repo_url: str):
 
         client = MongoClient(mongo_uri)
         collection = client["codebase_rag"]["vectors"]
+
+        # Delete all previously ingested chunks for this repo to prevent duplicates
+        delete_result = collection.delete_many({"metadata.repo_url": repo_url})
+        print(f"Deleted {delete_result.deleted_count} stale chunks for {repo_url}")
 
         embeddings = JinaEmbeddings(
             jina_api_key=jina_api_key,

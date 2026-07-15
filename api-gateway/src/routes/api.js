@@ -50,9 +50,10 @@ router.post('/chat/message', async (req, res) => {
             chatHistory.push({ role: 'ai',         content: entry.ai_response });
         });
 
-        // 2. Forward to AI service with history + session_id
+        // 2. Forward to AI service with history, session_id, and repo_url for namespace isolation
         const response = await axios.post(`${AI_SERVICE_URL}/agent/chat`, {
             message,
+            repo_url,
             session_id,
             chat_history: chatHistory,
         });
