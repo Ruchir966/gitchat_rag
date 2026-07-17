@@ -13,3 +13,6 @@ build/
 
 # Logs
 *.log
+
+# Interview prep notes - not part of the codebase
+docs/interview/
