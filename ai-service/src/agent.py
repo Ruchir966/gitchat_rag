@@ -50,30 +50,54 @@ def extract_mentioned_filename(question: str) -> str | None:
     return match.group(0) if match else None
 
 # ---------------------------------------------------------------------------
-# LLM / Vectorstore factories
+# Singleton clients — initialized once at module load time.
+# All node functions share the same connection pools for the lifetime of the
+# process, avoiding repeated DNS/TLS handshakes and DB connection overhead.
 # ---------------------------------------------------------------------------
 
-def get_llm():
-    """Create LLM at call time to ensure env vars are loaded."""
-    return ChatGroq(
+_mongo_client: MongoClient | None = None
+_vectorstore: MongoDBAtlasVectorSearch | None = None
+_llm: ChatGroq | None = None
+
+
+def _init_singletons() -> None:
+    """Build all external clients once and store them in module-level globals."""
+    global _mongo_client, _vectorstore, _llm
+
+    _llm = ChatGroq(
         model_name="llama-3.1-8b-instant",
-        groq_api_key=os.environ.get("GROQ_API_KEY")
+        groq_api_key=os.environ.get("GROQ_API_KEY"),
     )
 
-def get_vectorstore():
-    mongo_uri = os.environ.get("MONGO_URI")
-    client = MongoClient(mongo_uri)
-    collection = client["codebase_rag"]["vectors"]
+    _mongo_client = MongoClient(os.environ.get("MONGO_URI"))
+    collection = _mongo_client["codebase_rag"]["vectors"]
     embeddings = JinaEmbeddings(
         jina_api_key=os.environ.get("JINA_API_KEY"),
-        model_name="jina-embeddings-v3"
+        model_name="jina-embeddings-v3",
     )
-    return MongoDBAtlasVectorSearch(
+    _vectorstore = MongoDBAtlasVectorSearch(
         collection=collection,
         embedding=embeddings,
         index_name="default",
-        relevance_score_fn="cosine"
+        relevance_score_fn="cosine",
     )
+
+
+_init_singletons()
+
+# ---------------------------------------------------------------------------
+# Getter functions — thin accessors that return the pre-built singletons.
+# Node functions call these on every invocation; no objects are constructed.
+# ---------------------------------------------------------------------------
+
+def get_llm() -> ChatGroq:
+    """Return the globally initialized ChatGroq singleton."""
+    return _llm
+
+
+def get_vectorstore() -> MongoDBAtlasVectorSearch:
+    """Return the globally initialized MongoDBAtlasVectorSearch singleton."""
+    return _vectorstore
 
 # ---------------------------------------------------------------------------
 # Node 1: retrieve
@@ -127,10 +151,22 @@ def retrieve(state: GraphState) -> GraphState:
         ]
         print(f"[retrieve] Score-filtered: {len(filtered)}/{len(results_with_scores)} chunks above threshold {RELEVANCE_SCORE_THRESHOLD}")
         documents = filtered if filtered else [doc for doc, _ in results_with_scores]
-    except Exception:
-        # Fallback: plain similarity search without scores
-        retriever = vectorstore.as_retriever(search_kwargs={"k": 12, "pre_filter": repo_filter})
-        documents = retriever.invoke(question)
+    except Exception as e1:
+        # Fallback 1: plain retriever with pre_filter
+        try:
+            retriever = vectorstore.as_retriever(search_kwargs={"k": 12, "pre_filter": repo_filter})
+            documents = retriever.invoke(question)
+        except Exception:
+            # Fallback 2: no pre_filter — handles case where metadata.repo_url is not
+            # declared as a filter field in the MongoDB Atlas Vector Search index.
+            print(f"[retrieve] pre_filter failed ({type(e1).__name__}), falling back to unfiltered search")
+            try:
+                results_with_scores = vectorstore.similarity_search_with_score(query=question, k=12)
+                filtered = [doc for doc, score in results_with_scores if score >= RELEVANCE_SCORE_THRESHOLD]
+                documents = filtered if filtered else [doc for doc, _ in results_with_scores]
+            except Exception:
+                retriever = vectorstore.as_retriever(search_kwargs={"k": 12})
+                documents = retriever.invoke(question)
 
     return {**state, "documents": documents}
 
@@ -317,7 +353,7 @@ def run_agent(
     chat_history: Optional[list[BaseMessage]] = None,
 ) -> dict:
     """
-    Run the self-healing RAG agent.
+    Run the self-healing RAG agent synchronously.
 
     Args:
         question:     The user's current question.
@@ -341,6 +377,50 @@ def run_agent(
 
     final_state = None
     for output in app.stream(inputs):
+        for key, value in output.items():
+            final_state = value
+
+    return {
+        "generation": final_state.get("generation", ""),
+        "sources": final_state.get("sources", []),
+        "retry_count": final_state.get("retry_count", 0),
+    }
+
+
+async def arun_agent(
+    question: str,
+    repo_url: str,
+    chat_history: Optional[list[BaseMessage]] = None,
+) -> dict:
+    """
+    Run the self-healing RAG agent asynchronously using astream().
+
+    Preferred over run_agent() inside async contexts (e.g. FastAPI endpoints)
+    because it yields control back to the event loop between graph steps,
+    keeping the server responsive to concurrent requests.
+
+    Args:
+        question:     The user's current question.
+        repo_url:     The GitHub repo URL to scope vector searches to.
+        chat_history: List of BaseMessage objects representing prior turns.
+
+    Returns:
+        dict with keys: generation (str), sources (list[str]), retry_count (int)
+    """
+    inputs: GraphState = {
+        "question": question,
+        "original_question": question,
+        "generation": "",
+        "documents": [],
+        "retry_count": 0,
+        "is_relevant": False,
+        "chat_history": chat_history or [],
+        "sources": [],
+        "repo_url": repo_url,
+    }
+
+    final_state = None
+    async for output in app.astream(inputs):
         for key, value in output.items():
             final_state = value
 

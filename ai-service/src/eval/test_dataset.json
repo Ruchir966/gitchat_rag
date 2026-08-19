@@ -1,0 +1,52 @@
+[
+  {
+    "question": "What is the overall architecture of this project?",
+    "ground_truth": "The project follows a 3-service architecture: a React+Vite frontend, a Node.js/Express API Gateway that handles routing and chat history via MongoDB/Mongoose, and a Python/FastAPI AI Service that runs the LangGraph RAG agent with Jina embeddings, Groq LLM, and MongoDB Atlas Vector Search.",
+    "repo_url": "https://github.com/Ruchir966/gitchat_rag"
+  },
+  {
+    "question": "How does the retrieval process work?",
+    "ground_truth": "The retrieve node uses a 3-tier strategy: (1) structural queries are routed to the directory_tree document, (2) file-specific queries filter by filename using regex matching, (3) all other queries use similarity_search_with_score with a cosine threshold of 0.3, filtering out weak matches. All searches are scoped to the active repo via a pre_filter on metadata.repo_url.",
+    "repo_url": "https://github.com/Ruchir966/gitchat_rag"
+  },
+  {
+    "question": "What happens when retrieved documents are not relevant?",
+    "ground_truth": "The grade_documents node uses an LLM to judge if the retrieved chunks are relevant to the question. If they are not relevant and retry_count is below MAX_RETRIES (2), the system rewrites the query using the rewrite_query node and loops back to retrieve. If retries are exhausted, it generates from the best available context as graceful degradation.",
+    "repo_url": "https://github.com/Ruchir966/gitchat_rag"
+  },
+  {
+    "question": "What embedding model is used and what are its dimensions?",
+    "ground_truth": "The project uses Jina AI's jina-embeddings-v3 model which produces 1024-dimensional vectors. Embeddings are generated via the JinaEmbeddings class from langchain_community and stored in MongoDB Atlas Vector Search with cosine similarity.",
+    "repo_url": "https://github.com/Ruchir966/gitchat_rag"
+  },
+  {
+    "question": "How is chat history managed in the system?",
+    "ground_truth": "Chat history is managed by the API Gateway using a Mongoose ChatHistory model stored in MongoDB Atlas. The gateway fetches the last 10 exchanges (sorted by created_at) before each request, converts them to LangChain HumanMessage and AIMessage objects, and passes them to the AI service. The generate node formats the last 20 messages into a conversation string that is included in the prompt.",
+    "repo_url": "https://github.com/Ruchir966/gitchat_rag"
+  },
+  {
+    "question": "How does the ingestion pipeline process a GitHub repository?",
+    "ground_truth": "The ingest pipeline: (1) clones the repo to a temp directory using GitPython, (2) builds a directory tree document with metadata type 'structure', (3) loads files with supported extensions using DirectoryLoader and TextLoader while filtering out blocked files like package-lock.json, (4) chunks documents using RecursiveCharacterTextSplitter with chunk_size=2000 and chunk_overlap=200, (5) caps at MAX_CHUNKS=2000, (6) deletes stale chunks for the repo, and (7) embeds and stores in batches of 100 with retry logic for rate limits.",
+    "repo_url": "https://github.com/Ruchir966/gitchat_rag"
+  },
+  {
+    "question": "What LLM is used for generating answers and why?",
+    "ground_truth": "The project uses Groq's llama-3.1-8b-instant model via the ChatGroq class from langchain_groq. Groq is chosen for fast and cheap LLM inference. The same model is used across all LLM calls: grading document relevance, rewriting queries, and generating final answers.",
+    "repo_url": "https://github.com/Ruchir966/gitchat_rag"
+  },
+  {
+    "question": "What files does the project structure contain?",
+    "ground_truth": "The project has three main services: (1) frontend/ — a React+Vite app with components like Dashboard.jsx and ChatRoom.jsx styled with Tailwind CSS, (2) api-gateway/ — a Node.js/Express server with routes in api.js and models like ChatHistory.js, (3) ai-service/ — a Python/FastAPI service with main.py, agent.py (LangGraph RAG logic), and ingest.py (ingestion pipeline). Plus a root .env file and docs/ directory.",
+    "repo_url": "https://github.com/Ruchir966/gitchat_rag"
+  },
+  {
+    "question": "How does source attribution work in the generated answers?",
+    "ground_truth": "In the generate node, the system iterates over all retrieved documents and collects unique source file paths from doc.metadata['source'], extracting just the basename using os.path.basename(). It excludes the 'directory_tree' source. The sorted list of source filenames is returned in the 'sources' key of the response, and the frontend renders them as source badges alongside the answer.",
+    "repo_url": "https://github.com/Ruchir966/gitchat_rag"
+  },
+  {
+    "question": "What is the relevance score threshold and how is it used?",
+    "ground_truth": "The RELEVANCE_SCORE_THRESHOLD is set to 0.3 for cosine similarity. During the default retrieval path, similarity_search_with_score returns documents with scores, and chunks below 0.3 are filtered out. If no chunks pass the threshold, the system falls back to using all retrieved chunks unfiltered to avoid returning empty results.",
+    "repo_url": "https://github.com/Ruchir966/gitchat_rag"
+  }
+]

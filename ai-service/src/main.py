@@ -6,7 +6,7 @@ from dotenv import load_dotenv, find_dotenv
 load_dotenv(find_dotenv())  # Searches parent directories for .env
 
 from src.ingest import process_github_repo
-from src.agent import run_agent
+from src.agent import run_agent, arun_agent
 from langchain_core.messages import HumanMessage, AIMessage
 
 app = FastAPI(title="Codebase RAG AI Service")
@@ -48,7 +48,7 @@ async def chat(request: ChatRequest):
             elif msg.role in ("ai", "assistant"):
                 lc_history.append(AIMessage(content=msg.content))
 
-        result = run_agent(
+        result = await arun_agent(
             question=request.message,
             repo_url=request.repo_url,
             chat_history=lc_history,
