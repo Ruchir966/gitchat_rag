@@ -1,3 +1,5 @@
+import traceback
+
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 from typing import Optional
@@ -61,6 +63,8 @@ async def chat(request: ChatRequest):
             "session_id": request.session_id,
         }
     except Exception as e:
+        print(f"[ERROR] /agent/chat failed: {e}")
+        traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))
 
 

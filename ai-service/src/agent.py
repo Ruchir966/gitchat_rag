@@ -143,7 +143,7 @@ def retrieve(state: GraphState) -> GraphState:
     # Default: Similarity search with score — filter out weak matches
     try:
         results_with_scores = vectorstore.similarity_search_with_score(
-            query=question, k=12, pre_filter=repo_filter
+            query=question, k=6, pre_filter=repo_filter
         )
         filtered = [
             doc for doc, score in results_with_scores
@@ -154,18 +154,18 @@ def retrieve(state: GraphState) -> GraphState:
     except Exception as e1:
         # Fallback 1: plain retriever with pre_filter
         try:
-            retriever = vectorstore.as_retriever(search_kwargs={"k": 12, "pre_filter": repo_filter})
+            retriever = vectorstore.as_retriever(search_kwargs={"k": 6, "pre_filter": repo_filter})
             documents = retriever.invoke(question)
         except Exception:
             # Fallback 2: no pre_filter — handles case where metadata.repo_url is not
             # declared as a filter field in the MongoDB Atlas Vector Search index.
             print(f"[retrieve] pre_filter failed ({type(e1).__name__}), falling back to unfiltered search")
             try:
-                results_with_scores = vectorstore.similarity_search_with_score(query=question, k=12)
+                results_with_scores = vectorstore.similarity_search_with_score(query=question, k=6)
                 filtered = [doc for doc, score in results_with_scores if score >= RELEVANCE_SCORE_THRESHOLD]
                 documents = filtered if filtered else [doc for doc, _ in results_with_scores]
             except Exception:
-                retriever = vectorstore.as_retriever(search_kwargs={"k": 12})
+                retriever = vectorstore.as_retriever(search_kwargs={"k": 6})
                 documents = retriever.invoke(question)
 
     return {**state, "documents": documents}
